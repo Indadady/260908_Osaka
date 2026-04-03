@@ -634,10 +634,11 @@
                             <!-- 실시간 환율 계산기 -->
                             <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100 shadow-inner">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h4 class="font-bold text-blue-900 text-lg">엔화(¥) 간편 계산기</h4>
-                                    <span class="text-[10px] bg-blue-200 text-blue-800 px-2 py-1 rounded font-bold">오프라인 가능</span>
+                                    <h4 class="font-bold text-blue-900 text-lg">엔화(¥) 실시간 계산기</h4>
+                                    <!-- 실시간 연동 상태 뱃지로 변경 -->
+                                    <span id="rate-status" class="text-[10px] bg-green-200 text-green-800 px-2 py-1 rounded font-bold"><i class="fa-solid fa-wifi"></i> 실시간 연동중</span>
                                 </div>
-                                <p class="text-xs text-blue-600 mb-4">물건의 가격표(엔화)를 입력하면 대략적인 한국 돈으로 변환해 줍니다.</p>
+                                <p class="text-xs text-blue-600 mb-4">현지 물건 가격(엔화)을 입력하면 <strong>송금 보낼 때(결제) 환율</strong> 기준으로 한국 돈을 계산해 줍니다.</p>
                                 
                                 <div class="relative mb-4">
                                     <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-bold">¥</span>
@@ -650,7 +651,8 @@
                                     <p class="text-xs text-slate-300 mb-1">대략 한국 돈으로</p>
                                     <p class="text-3xl font-black text-yellow-400" id="krw-output">0 <span class="text-lg font-bold text-white">원</span></p>
                                 </div>
-                                <p class="text-right text-[10px] text-slate-400 mt-2">※ 기준 환율: 100엔 = 약 920원 (어림값 적용)</p>
+                                <!-- API에서 가져온 실시간 송금 환율 안내를 표시할 요소 -->
+                                <p id="rate-display-info" class="text-right text-[10px] text-slate-500 mt-2 font-bold">※ 기준 환율: 실시간 데이터 로딩중...</p>
                             </div>
                         </div>
                     </div>
@@ -709,7 +711,7 @@
                                     <div class="text-amber-500 text-2xl mt-1"><i class="fa-solid fa-umbrella"></i></div>
                                     <div>
                                         <p class="font-bold text-slate-800">접이식 우산 / 미니 우비</p>
-                                        <p class="text-sm text-slate-600 mt-1">가을비나 USJ 어트랙션(워터월드 등) 탑승 시 옷이 젖는 것을 방지하기 위해 가벼운 우비나 작은 우산을 챙기면 좋습니다.</p>
+                                        <p class="text-sm text-slate-600 mt-1">가일비나 USJ 어트랙션(워터월드 등) 탑승 시 옷이 젖는 것을 방지하기 위해 가벼운 우비나 작은 우산을 챙기면 좋습니다.</p>
                                     </div>
                                 </div>
                             </div>
@@ -1124,16 +1126,60 @@
             window.addEventListener('resize', autoResize);
         })();
 
-        // 💰 환율 계산기 로직
+        // 💰 실시간 환율 연동 로직 (API 연동 및 송금 환율 적용)
+        let ttSellsRate = 9.2; // 초기 Fallback 환율 (1엔 = 9.2원 가정)
+
+        async function fetchExchangeRate() {
+            try {
+                // 실시간 환율 API 호출 (매매기준율)
+                const response = await fetch('https://open.er-api.com/v6/latest/JPY');
+                const data = await response.json();
+                
+                if (data && data.rates && data.rates.KRW) {
+                    const baseRate = data.rates.KRW; 
+                    
+                    // 💡 실질적인 결제/송금 환율 적용: 통상 은행의 '송금 보낼 때' 수수료율 (약 0.98% ~ 1% 할증)
+                    // 학생이나 학부모님이 카드로 긁거나 송금할 때의 실질 체감 금액을 보여주기 위함입니다.
+                    ttSellsRate = baseRate * 1.0098; 
+                    
+                    // UI 업데이트 (안내문구)
+                    const rateDisplay = document.getElementById('rate-display-info');
+                    if(rateDisplay) {
+                        rateDisplay.innerHTML = `※ 실시간 송금(결제) 환율 적용: 100엔 = 약 ${(ttSellsRate * 100).toFixed(0)}원`;
+                    }
+                    
+                    // 연동 상태 뱃지 업데이트
+                    const statusBadge = document.getElementById('rate-status');
+                    if(statusBadge) {
+                        statusBadge.innerHTML = `<i class="fa-solid fa-wifi"></i> 실시간 연동중`;
+                        statusBadge.className = "text-[10px] bg-green-200 text-green-800 px-2 py-1 rounded font-bold";
+                    }
+
+                    // 이미 값이 입력되어 있다면 즉시 재계산
+                    calculateExchange();
+                }
+            } catch (error) {
+                console.error("환율 정보를 불러오는 데 실패하여 기본 오프라인 환율을 적용합니다.", error);
+                const rateDisplay = document.getElementById('rate-display-info');
+                if(rateDisplay) {
+                    rateDisplay.innerHTML = `※ 오프라인 모드 기준 환율 적용: 100엔 = 약 ${(ttSellsRate * 100).toFixed(0)}원`;
+                }
+                const statusBadge = document.getElementById('rate-status');
+                if(statusBadge) {
+                    statusBadge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> 오프라인 모드`;
+                    statusBadge.className = "text-[10px] bg-slate-200 text-slate-800 px-2 py-1 rounded font-bold";
+                }
+            }
+        }
+
+        // 환율 계산 실행 함수
         function calculateExchange() {
             const jpyInput = document.getElementById('jpy-input').value;
             const krwOutput = document.getElementById('krw-output');
             
-            // 2026년 기준 대략적인 적용 환율 (100엔 = 920원 가정 시, 1엔 = 9.2원)
-            const rate = 9.2; 
-            
             if(jpyInput && jpyInput > 0) {
-                const krw = Math.round(jpyInput * rate);
+                // 실시간 송금 환율을 적용하여 반올림
+                const krw = Math.round(jpyInput * ttSellsRate);
                 krwOutput.innerHTML = krw.toLocaleString() + ' <span class="text-lg font-bold text-white">원</span>';
             } else {
                 krwOutput.innerHTML = '0 <span class="text-lg font-bold text-white">원</span>';
@@ -1216,8 +1262,11 @@
             }
         }
         
-        // 페이지 로드 시 날씨 호출
-        document.addEventListener('DOMContentLoaded', fetchOsakaWeather);
+        // 페이지 로드 시 날씨 및 실시간 환율 호출
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchOsakaWeather();
+            fetchExchangeRate(); // 새로 추가된 실시간 환율 연동 실행
+        });
 
         // Map Route Logic
         let map;
